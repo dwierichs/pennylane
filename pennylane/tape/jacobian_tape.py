@@ -246,7 +246,7 @@ class JacobianTape(QuantumTape):
 
         Returns:
             tuple[list[QuantumTape], function]: A tuple containing the list of generated tapes,
-            in addition to a post-processing function to be applied to the evaluated
+            as well as a post-processing function to be applied to the evaluated
             tapes.
         """
 
@@ -256,75 +256,47 @@ class JacobianTape(QuantumTape):
         order = options.get("order", 1)
         h = options.get("h", 1e-7)
 
+        if order == 1:
+            shift_prefactors = [0, 1.0]
+            processing_coefficients = [-1.0, 1.0]
+        elif order == 2:
+            shift_prefactors = [-0.5, 0.5]
+            processing_coefficients = [-1.0, 1.0]
+        else:
+            raise ValueError("Currently only the forward and the central finite",
+                    f"difference methods are supported. Got order={order}")
+
         shift = np.zeros_like(params, dtype=np.float64)
         shift[idx] = h
 
-        if order == 1:
-            # forward finite-difference.
+        tapes = []
+        for prefactor, coefficient in zip(shift_prefactors, processing_coefficients):
+            # see whether the term we are looking at is the original circuit
+            if prefactor==0:
+                # get the stored result of the original circuit
+                y0 = options.get("y0", None)
+                if y0 is not None:
+                    dummy = lambda *args, **kwargs: y0
+                    tapes.append(dummy)
+                    continue
+            tmp_tape = self.copy(copy_operations=True, tape_cls=QuantumTape)
+            tmp_tape.set_parameters(params + prefactor*shift)
+            tapes.append(tmp_tape)
 
-            tapes = []
+        def processing_fn(results):
+            f"""Computes the gradient of the parameter at index {idx} via finite
+            differences of order {order}
 
-            # get the stored result of the original circuit
-            y0 = options.get("y0", None)
+            Args:
+                results (list[real]): evaluated quantum tapes
 
-            shifted = self.copy(copy_operations=True, tape_cls=QuantumTape)
-            shifted.set_parameters(params + shift)
+            Returns:
+                array[float]: 1-dimensional array of length determined by the tape output
+                measurement statistics
+            """
+            return np.dot(results, processing_coefficients) / h
 
-            tapes.append(shifted)
-
-            if y0 is None:
-                tapes.append(self)
-
-            def processing_fn(results):
-                """Computes the gradient of the parameter at index idx via first-order
-                forward finite differences.
-
-                Args:
-                    results (list[real]): evaluated quantum tapes
-
-                Returns:
-                    array[float]: 1-dimensional array of length determined by the tape output
-                    measurement statistics
-                """
-                shifted = np.array(results[0])
-                unshifted = y0
-
-                if unshifted is None:
-                    unshifted = np.array(results[1])
-
-                return (shifted - unshifted) / h
-
-            return tapes, processing_fn
-
-        if order == 2:
-            # central finite difference
-
-            shifted_forward = self.copy(copy_operations=True, tape_cls=QuantumTape)
-            shifted_forward.set_parameters(params + shift / 2)
-
-            shifted_backward = self.copy(copy_operations=True, tape_cls=QuantumTape)
-            shifted_backward.set_parameters(params - shift / 2)
-
-            tapes = [shifted_forward, shifted_backward]
-
-            def second_order_processing_fn(results):
-                """Computes the gradient of the parameter at index idx via second-order
-                centered finite differences.
-
-                Args:
-                    results (list[real]): evaluated quantum tapes
-
-                Returns:
-                    array[float]: 1-dimensional array of length determined by the tape output
-                    measurement statistics
-                """
-                res0 = np.array(results[0])
-                res1 = np.array(results[1])
-                return (res0 - res1) / h
-
-            return tapes, second_order_processing_fn
-
-        raise ValueError("Order must be 1 or 2.")
+        return tapes, processing_fn
 
     def device_pd(self, device, params=None, **options):
         """Evaluate the gradient of the tape with respect to

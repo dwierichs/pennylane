@@ -325,7 +325,7 @@ def finite_diff(f, N=1, argnum=0, idx=None, delta=0.01):
         \frac{\partial f(x)}{\partial x_i} \approx \frac{f(x_i + \delta/2)
         - f(x_i - \delta/2)}{\delta}
 
-    On the other hand, the second-order derivative
+    On the other hand, the second-order derivatives
     :math:`\frac{\partial^2 f(x)}{\partial x_i \partial x_j}` are evaluated using the
     following expressions:
 
