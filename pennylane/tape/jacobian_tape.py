@@ -270,19 +270,24 @@ class JacobianTape(QuantumTape):
         shift[idx] = h
 
         tapes = []
-        for prefactor, coefficient in zip(shift_prefactors, processing_coefficients):
+        for prefactor in shift_prefactors:
             # see whether the term we are looking at is the original circuit
             if prefactor==0:
                 # get the stored result of the original circuit
                 y0 = options.get("y0", None)
+                # if the stored result existed, create a dummy function to return it
+                # this enables us to treat the cached value the same as shifted tapes
+                # in processing_fn
                 if y0 is not None:
                     dummy = lambda *args, **kwargs: y0
                     tapes.append(dummy)
                     continue
+            # append a new tape for shifts!=0 or missing original circuit evaluation
             tmp_tape = self.copy(copy_operations=True, tape_cls=QuantumTape)
             tmp_tape.set_parameters(params + prefactor*shift)
             tapes.append(tmp_tape)
 
+        # create post-processing function to combine tape results into derivative
         def processing_fn(results):
             f"""Computes the gradient of the parameter at index {idx} via finite
             differences of order {order}
